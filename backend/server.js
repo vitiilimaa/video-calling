@@ -2,11 +2,13 @@ import express from "express";
 import { createServer } from "http";
 import { Server } from "socket.io";
 
-import 'dotenv/config'
+import "dotenv/config";
 
 const app = express();
 const server = createServer(app);
 const io = new Server(server);
+
+const apiOneSignalUrl = "https://onesignal.com/api/v1/";
 
 const allUsers = {};
 io.on("connection", (socket) => {
@@ -31,17 +33,14 @@ io.on("connection", (socket) => {
     };
 
     try {
-      const response = await fetch(
-        "https://onesignal.com/api/v1/notifications",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Basic ${process.env.ONESIGNAL_API_KEY}`,
-          },
-          body: JSON.stringify(notificationData),
-        }
-      );
+      const response = await fetch(`${apiOneSignalUrl}/notifications`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Basic ${process.env.ONESIGNAL_API_KEY}`,
+        },
+        body: JSON.stringify(notificationData),
+      });
 
       const notification = await response.json();
       allUsers[to].notification_id = notification.id;
@@ -60,7 +59,7 @@ io.on("connection", (socket) => {
     socket.broadcast.emit("icecandidate", candidate);
   });
 
-  socket.on("hangup-call", async () => {
+  socket.on("hangup-call", () => {
     io.emit("call-ended", true);
   });
 

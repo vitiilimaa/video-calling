@@ -13,12 +13,8 @@ import Button from './components/Button';
 import io, {Socket} from 'socket.io-client';
 import {IP_ADDRESS, ONESIGNAL_APP_ID} from '@env';
 import DeviceInfo from 'react-native-device-info';
-import {
-  LogLevel,
-  NotificationClickEvent,
-  OneSignal,
-} from 'react-native-onesignal';
-import {AllUsers, UserJoined} from './types/User';
+import {NotificationClickEvent, OneSignal} from 'react-native-onesignal';
+import {UsersJoined} from './types/User';
 import {
   AnswerPayload,
   IceCandidatePayload,
@@ -56,7 +52,7 @@ function App() {
     offer: null,
     answer: null,
   });
-  const [users, setUsers] = useState<UserJoined>({
+  const [users, setUsers] = useState<UsersJoined>({
     username: '',
     oneSignalSubscriptionId: '',
   });
@@ -86,15 +82,15 @@ function App() {
 
   useEffect(() => {
     if (socket && username && oneSignalSubscriptionId) {
-      const userJoinedObj: UserJoined = {
+      const userJoinedObj: UsersJoined = {
         username,
         oneSignalSubscriptionId,
       };
       socket.emit('user-joined', userJoinedObj);
 
-      const handleUsers = (allUsers: AllUsers) => {
+      const handleUsers = (allUsers: UsersJoined) => {
         console.log({allUsers});
-        setUsers(prevState => ({...prevState, allUsers}));
+        setUsers(allUsers);
       };
 
       const handleOffer = async ({from, to, offer}: OfferPayload) => {
@@ -105,7 +101,6 @@ function App() {
           offer,
         }));
         setGettingCall(true);
-        // await displayNotifications();
       };
 
       const handleAnswer = async ({answer}: AnswerPayload) => {
@@ -133,14 +128,12 @@ function App() {
         OneSignal.Notifications.clearAll();
       };
 
-      // Add socket event listeners
       socket.on('get-users', handleUsers);
       socket.on('offer', handleOffer);
       socket.on('answer', handleAnswer);
       socket.on('icecandidate', handleIceCandidate);
       socket.on('call-ended', handleCallEnded);
 
-      // Cleanup on component unmount
       return () => {
         socket.off('get-users', handleUsers);
         socket.off('offer', handleOffer);
@@ -154,17 +147,26 @@ function App() {
   useEffect(() => {
     const onOpen = async (event: NotificationClickEvent) => {
       const action = event.result.actionId;
-      if (action === 'accept-call') await join();
-      else if (action === 'refuse-call') await hangup();
-      else console.log('Você abriu o app');
+      if (action === 'accept-call') {
+        await join();
+        OneSignal.Notifications.clearAll();
+      } else if (action === 'refuse-call') {
+        await hangup();
+        if (peerConnection.current) {
+          peerConnection.current.close();
+          peerConnection.current = undefined;
+        }
+        streamCleanUp();
+        setGettingCall(false);
+        OneSignal.Notifications.clearAll();
+      } else console.log('Você abriu o app');
     };
 
-    OneSignal.Debug.setLogLevel(LogLevel.Verbose);
     OneSignal.initialize(ONESIGNAL_APP_ID);
     OneSignal.Notifications.requestPermission(true);
     OneSignal.Notifications.addEventListener('click', onOpen);
     return () => OneSignal.Notifications.removeEventListener('click', onOpen);
-  }, []);
+  }, [socket, username, oneSignalSubscriptionId, call]);
 
   // Configura uma conexão WebRTC para estabelecer uma chamada de vídeo entre dois peers (usuários)
   const setupWebrtc = async () => {
@@ -198,19 +200,22 @@ function App() {
     // Define um listener que será acionado quando um stream for recebido do peer remoto
     // Quando isso acontecer, remoteStream é setado, exibindo o vídeo do outro participante da chamada
     if ('ontrack' in peerConnection.current) {
-      peerConnection.current.ontrack = (event: RTCTrackEvent<"track">) => {
+      peerConnection.current.ontrack = (event: RTCTrackEvent<'track'>) => {
         if (event.streams && event.streams[0]) {
           setRemoteStream(event.streams[0]);
         }
       };
     }
 
-    if (socket && 'onicecandidate' in peerConnection.current)
-      peerConnection.current.onicecandidate = (event: RTCIceCandidateEvent<'icecandidate'>) => {
+    if (socket && 'onicecandidate' in peerConnection.current) {
+      peerConnection.current.onicecandidate = (
+        event: RTCIceCandidateEvent<'icecandidate'>,
+      ) => {
         if (event.candidate) {
           socket.emit('icecandidate', event.candidate);
         }
       };
+    }
   };
 
   const create = async () => {
