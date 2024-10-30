@@ -9,5 +9,5 @@ export type AnswerPayload = {
 }
 
 export type IceCandidatePayload = {
-  candidate: RTCIceCandidateInit;
+  candidates: RTCIceCandidateInit;
 }

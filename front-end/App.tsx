@@ -3,7 +3,6 @@ import {StyleSheet, View} from 'react-native';
 import Video from './components/Video';
 import {
   MediaStream,
-  RTCIceCandidate,
   RTCPeerConnection,
   RTCSessionDescription,
   mediaDevices,
@@ -11,7 +10,7 @@ import {
 import GettingCall from './components/GettingCall';
 import Button from './components/Button';
 import io, {Socket} from 'socket.io-client';
-import {IP_ADDRESS, ONESIGNAL_APP_ID} from '@env';
+import {ONESIGNAL_APP_ID} from '@env';
 import DeviceInfo from 'react-native-device-info';
 import {NotificationClickEvent, OneSignal} from 'react-native-onesignal';
 import {UsersJoined} from './types/User';
@@ -22,11 +21,12 @@ import {
 } from './types/payload';
 import RTCTrackEvent from 'react-native-webrtc/lib/typescript/RTCTrackEvent';
 import RTCIceCandidateEvent from 'react-native-webrtc/lib/typescript/RTCIceCandidateEvent';
+import {IP_ADDRESS} from '@env';
 
 const config = {
   iceServers: [
     {
-      urls: 'stun:stun.l.google.com:19302',
+      urls: ['stun:stun.l.google.com:19302'],
     },
   ],
 };
@@ -104,17 +104,44 @@ function App() {
       };
 
       const handleAnswer = async ({answer}: AnswerPayload) => {
-        if (peerConnection.current) {
-          setCall(prevState => ({...prevState, answer}));
-          await peerConnection.current.setRemoteDescription(answer);
+        try {
+          if (peerConnection.current) {
+            setCall(prevState => ({...prevState, answer}));
+            const answerDescription = new RTCSessionDescription(answer);
+            await peerConnection.current.setRemoteDescription(
+              answerDescription,
+            );
+
+            const personWhoWillCall = username;
+            const personWhoWillBeCalled = Object.keys(users || {}).find(
+              key => key !== username,
+            );
+
+            socket.emit('answerIcecandidate', {
+              from: personWhoWillCall,
+              to: personWhoWillBeCalled,
+              answer: peerConnection.current.localDescription,
+            });
+            OneSignal.Notifications.clearAll();
+          }
+        } catch (err) {
+          console.error('error handleAnswer:', err);
         }
       };
 
-      const handleIceCandidate = async ({candidate}: IceCandidatePayload) => {
-        if (peerConnection.current) {
-          await peerConnection.current.addIceCandidate(
-            new RTCIceCandidate(candidate),
-          );
+      const handleIceCandidate = async ({candidates}: IceCandidatePayload) => {
+        try {
+          if (peerConnection.current) {
+            for (const candidate of candidates) {
+              await peerConnection.current
+                .addIceCandidate(candidate)
+                .catch(error =>
+                  console.error('Error adding ICE candidate:', error),
+                );
+            }
+          }
+        } catch (err) {
+          console.error('error handleIceCandidate:', err);
         }
       };
 
@@ -149,7 +176,6 @@ function App() {
       const action = event.result.actionId;
       if (action === 'accept-call') {
         await join();
-        OneSignal.Notifications.clearAll();
       } else if (action === 'refuse-call') {
         await hangup();
         if (peerConnection.current) {
@@ -170,108 +196,161 @@ function App() {
 
   // Configura uma conexão WebRTC para estabelecer uma chamada de vídeo entre dois peers (usuários)
   const setupWebrtc = async () => {
-    // Esse objeto é responsável pela comunicação ponto a ponto entre dois dispositivos
-    // Ele gerencia o fluxo de dados (como áudio e vídeo) entre os peers
-    peerConnection.current = new RTCPeerConnection(config);
+    try {
+      // Esse objeto é responsável pela comunicação ponto a ponto entre dois dispositivos
+      // Ele gerencia o fluxo de dados (como áudio e vídeo) entre os peers
+      peerConnection.current = new RTCPeerConnection(config);
 
-    // Solicita acesso ao áudio e vídeo do dispositivo
-    // Pega o stream de áudio e vídeo para a chamada
-    const stream = await mediaDevices.getUserMedia({
-      audio: true,
-      video: {
-        frameRate: 30,
-        facingMode: 'front',
-      },
-    });
+      // Solicita acesso ao áudio e vídeo do dispositivo
+      // Pega o stream de áudio e vídeo para a chamada
+      const stream = await mediaDevices.getUserMedia({
+        audio: true,
+        video: {
+          frameRate: 30,
+          facingMode: 'front',
+        },
+      });
 
-    if (stream) {
-      // O vídeo e o áudio local são disponibilizados para serem transmitidos assim que as tracks
-      // do stream forem adicionadas à peerConnection
-      stream
-        .getTracks()
-        .forEach(
-          track =>
-            peerConnection.current &&
-            peerConnection.current.addTrack(track, stream),
-        );
-      setLocalStream(stream);
-    }
+      if (stream) {
+        // O vídeo e o áudio local são disponibilizados para serem transmitidos assim que as tracks
+        // do stream forem adicionadas à peerConnection
+        stream
+          .getTracks()
+          .forEach(
+            track =>
+              peerConnection.current &&
+              peerConnection.current.addTrack(track, stream),
+          );
+        setLocalStream(stream);
+      }
 
-    // Define um listener que será acionado quando um stream for recebido do peer remoto
-    // Quando isso acontecer, remoteStream é setado, exibindo o vídeo do outro participante da chamada
-    if ('ontrack' in peerConnection.current) {
-      peerConnection.current.ontrack = (event: RTCTrackEvent<'track'>) => {
-        if (event.streams && event.streams[0]) {
-          setRemoteStream(event.streams[0]);
-        }
-      };
-    }
-
-    if (socket && 'onicecandidate' in peerConnection.current) {
-      peerConnection.current.onicecandidate = (
-        event: RTCIceCandidateEvent<'icecandidate'>,
-      ) => {
-        if (event.candidate) {
-          socket.emit('icecandidate', event.candidate);
-        }
-      };
+      // Define um listener que será acionado quando um stream for recebido do peer remoto
+      // Quando isso acontecer, remoteStream é setado, exibindo o vídeo do outro participante da chamada
+      if ('ontrack' in peerConnection.current) {
+        peerConnection.current.ontrack = (event: RTCTrackEvent<'track'>) => {
+          if (event.streams && event.streams[0]) {
+            setRemoteStream(event.streams[0]);
+          }
+        };
+      }
+    } catch (err) {
+      console.error('error setupWebrtc:', err);
     }
   };
 
   const create = async () => {
-    await setupWebrtc();
+    try {
+      await setupWebrtc();
 
-    if (peerConnection.current && socket) {
-      // Cria uma offer para a chamada
-      const offerOptions = {
-        offerToReceiveAudio: true,
-        offerToReceiveVideo: true,
-      };
-      const offer = await peerConnection.current.createOffer(offerOptions);
-      await peerConnection.current.setLocalDescription(offer);
+      if (peerConnection.current && socket) {
+        const personWhoWillCall = username;
+        const personWhoWillBeCalled = Object.keys(users || {}).find(
+          key => key !== username,
+        );
 
-      const personWhoWillCall = username;
-      const personWhoWillBeCalled = Object.keys(users || {}).find(
-        key => key !== username,
-      );
+        if ('onicecandidate' in peerConnection.current) {
+          peerConnection.current.onicecandidate = (
+            event: RTCIceCandidateEvent<'icecandidate'>,
+          ) => {
+            if (event.candidate) {
+              socket.emit('offerCandidates', {
+                candidate: event.candidate.toJSON(),
+                from: personWhoWillCall || '',
+                to: personWhoWillBeCalled || '',
+              });
+            }
+          };
+        }
 
-      setCall(prevState => ({
-        ...prevState,
-        from: personWhoWillCall || '',
-        to: personWhoWillBeCalled || '',
-        offer: peerConnection.current
-          ? peerConnection.current.localDescription
-          : null,
-      }));
-      socket.emit('offer', {
-        from: personWhoWillCall,
-        to: personWhoWillBeCalled,
-        offer: peerConnection.current.localDescription,
-      });
+        // Cria uma offer para a chamada
+        const offerOptions = {
+          offerToReceiveAudio: true,
+          offerToReceiveVideo: true,
+        };
+        const offerDescription = await peerConnection.current.createOffer(
+          offerOptions,
+        );
+        await peerConnection.current.setLocalDescription(offerDescription);
+
+        const offer = {
+          type: offerDescription.type,
+          sdp: offerDescription.sdp,
+        };
+
+        setCall(prevState => ({
+          ...prevState,
+          from: personWhoWillCall || '',
+          to: personWhoWillBeCalled || '',
+          offer,
+        }));
+        socket.emit('offer', {
+          from: personWhoWillCall,
+          to: personWhoWillBeCalled,
+          offer,
+        });
+      }
+    } catch (err) {
+      console.error('error create:', err);
     }
   };
 
   const join = async () => {
     await setupWebrtc();
-    if (peerConnection.current && socket && call.offer) {
-      await peerConnection.current.setRemoteDescription(call.offer);
-      const answer = await peerConnection.current.createAnswer();
-      await peerConnection.current.setLocalDescription(answer);
+    try {
+      if (peerConnection.current && socket && call.offer) {
+        if ('onicecandidate' in peerConnection.current) {
+          peerConnection.current.onicecandidate = (
+            event: RTCIceCandidateEvent<'icecandidate'>,
+          ) => {
+            if (event.candidate) {
+              const currentUser = username;
+              const sendTo = Object.keys(users || {}).find(
+                key => key !== username,
+              );
+              socket.emit('answerCandidates', {
+                candidate: event.candidate.toJSON(),
+                from: currentUser || '',
+                to: sendTo || '',
+              });
+            }
+          };
+        }
 
-      setCall(prevState => ({
-        ...prevState,
-        answer: peerConnection.current
-          ? peerConnection.current.localDescription
-          : null,
-      }));
-      socket.emit('answer', {
-        from: call.from,
-        to: call.to,
-        answer: peerConnection.current.localDescription,
-      });
+        const offerDescription = call.offer;
+        await peerConnection.current.setRemoteDescription(
+          new RTCSessionDescription(offerDescription),
+        );
+
+        const answerDescription = await peerConnection.current.createAnswer();
+        await peerConnection.current.setLocalDescription(answerDescription);
+
+        const answer = {
+          type: answerDescription.type,
+          sdp: answerDescription.sdp,
+        };
+
+        setCall(prevState => ({
+          ...prevState,
+          answer,
+        }));
+
+        socket.emit('answer', {
+          from: call.from,
+          to: call.to,
+          answer,
+        });
+
+        socket.emit('offerIcecandidate', {
+          from: call.from,
+          to: call.to,
+        });
+      }
+
+      setGettingCall(false);
+      OneSignal.Notifications.clearAll();
+    } catch (err) {
+      console.error('error join:', err);
     }
-
-    setGettingCall(false);
   };
 
   // Para desconectar da chamada, libera a stream e deleta o documento da chamada
