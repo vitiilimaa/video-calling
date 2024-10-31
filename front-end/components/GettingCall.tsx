@@ -1,15 +1,16 @@
-import {View, StyleSheet, Image} from 'react-native';
+import {View, StyleSheet, Image, ImageSourcePropType} from 'react-native';
 import Button from './Button';
 
 type Props = {
   hangup: () => void;
   join: () => void;
+  photo: ImageSourcePropType | string;
 };
 
 export default function GettingCall(props: Props) {
   return (
     <View style={styles.container}>
-      <Image source={require('../img/Caller.jpg')} style={styles.image} />
+      <Image source={props.photo as ImageSourcePropType} style={styles.image} />
       <View style={styles.bContainer}>
         <Button
           iconName="phone"

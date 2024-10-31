@@ -12,8 +12,8 @@ const apiOneSignalUrl = "https://onesignal.com/api/v1/";
 
 const allUsers = {};
 io.on("connection", (socket) => {
-  socket.on("user-joined", ({ username, oneSignalSubscriptionId }) => {
-    allUsers[username] = { id: socket.id, oneSignalSubscriptionId };
+  socket.on("user-joined", ({ username, oneSignalSubscriptionId, photo }) => {
+    allUsers[username] = { id: socket.id, oneSignalSubscriptionId, photo };
     io.emit("get-users", allUsers);
   });
 
@@ -78,6 +78,14 @@ io.on("connection", (socket) => {
     socket.emit("icecandidate", {
       candidates: allUsers[from].answerCandidates,
     });
+  });
+
+  socket.on("toggleVideo", ({ isActive, to }) => {
+    socket.to(allUsers[to].id).emit("toggleVideo", isActive);
+  });
+
+  socket.on("toggleAudio", ({ isActive, to }) => {
+    socket.to(allUsers[to].id).emit("toggleAudio", isActive);
   });
 
   socket.on("hangup-call", () => {

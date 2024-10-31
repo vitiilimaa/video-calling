@@ -10,7 +10,7 @@ import {
 import GettingCall from './components/GettingCall';
 import Button from './components/Button';
 import io, {Socket} from 'socket.io-client';
-import {ONESIGNAL_APP_ID} from '@env';
+import {IP_ADDRESS, ONESIGNAL_APP_ID} from '@env';
 import DeviceInfo from 'react-native-device-info';
 import {NotificationClickEvent, OneSignal} from 'react-native-onesignal';
 import {UsersJoined} from './types/User';
@@ -21,7 +21,9 @@ import {
 } from './types/payload';
 import RTCTrackEvent from 'react-native-webrtc/lib/typescript/RTCTrackEvent';
 import RTCIceCandidateEvent from 'react-native-webrtc/lib/typescript/RTCIceCandidateEvent';
-import {IP_ADDRESS} from '@env';
+import YourImg from './img/Caller.jpg';
+import OtherImg from './img/Caller2.jpg';
+import {Alert} from 'react-native';
 
 const config = {
   iceServers: [
@@ -55,8 +57,13 @@ function App() {
   const [users, setUsers] = useState<UsersJoined>({
     username: '',
     oneSignalSubscriptionId: '',
+    photo: '',
   });
   const [socket, setSocket] = useState<Socket>();
+  const [activeVideoLocalStream, setActiveVideoLocalStream] = useState(true);
+  const [activeAudioLocalStream, setActiveAudioLocalStream] = useState(true);
+  const [activeVideoRemoteStream, setActiveVideoRemoteStream] = useState(true);
+  const [activeAudioRemoteStream, setActiveAudioRemoteStream] = useState(true);
   const peerConnection = useRef<RTCPeerConnection>();
 
   // Conecta ao servidor e seta um nome para o usuário que abriu o aplicativo
@@ -85,6 +92,8 @@ function App() {
       const userJoinedObj: UsersJoined = {
         username,
         oneSignalSubscriptionId,
+        // colocar seu username mockado
+        photo: username === 'user_id' ? YourImg : OtherImg,
       };
       socket.emit('user-joined', userJoinedObj);
 
@@ -122,7 +131,6 @@ function App() {
               to: personWhoWillBeCalled,
               answer: peerConnection.current.localDescription,
             });
-            OneSignal.Notifications.clearAll();
           }
         } catch (err) {
           console.error('error handleAnswer:', err);
@@ -153,6 +161,18 @@ function App() {
         streamCleanUp();
         setGettingCall(false);
         OneSignal.Notifications.clearAll();
+        setActiveVideoLocalStream(true);
+        setActiveAudioLocalStream(true);
+        setActiveVideoRemoteStream(true);
+        setActiveAudioRemoteStream(true);
+      };
+
+      const handleToggleVideo = (isActive: boolean) => {
+        setActiveVideoRemoteStream(isActive);
+      };
+
+      const handleToggleAudio = (isActive: boolean) => {
+        setActiveAudioRemoteStream(isActive);
       };
 
       socket.on('get-users', handleUsers);
@@ -160,6 +180,8 @@ function App() {
       socket.on('answer', handleAnswer);
       socket.on('icecandidate', handleIceCandidate);
       socket.on('call-ended', handleCallEnded);
+      socket.on('toggleVideo', handleToggleVideo);
+      socket.on('toggleAudio', handleToggleAudio);
 
       return () => {
         socket.off('get-users', handleUsers);
@@ -184,7 +206,6 @@ function App() {
         }
         streamCleanUp();
         setGettingCall(false);
-        OneSignal.Notifications.clearAll();
       } else console.log('Você abriu o app');
     };
 
@@ -192,7 +213,7 @@ function App() {
     OneSignal.Notifications.requestPermission(true);
     OneSignal.Notifications.addEventListener('click', onOpen);
     return () => OneSignal.Notifications.removeEventListener('click', onOpen);
-  }, [socket, username, oneSignalSubscriptionId, call]);
+  }, [socket, call]);
 
   // Configura uma conexão WebRTC para estabelecer uma chamada de vídeo entre dois peers (usuários)
   const setupWebrtc = async () => {
@@ -239,6 +260,13 @@ function App() {
   };
 
   const create = async () => {
+    if (Object.keys(users || {}).length !== 2) {
+      return Alert.alert(
+        'Alerta',
+        'É necessário que pelo menos tenha o cadastro de 2 pessoas no aplicativo.',
+      );
+    }
+
     try {
       await setupWebrtc();
 
@@ -275,7 +303,7 @@ function App() {
         const offer = {
           type: offerDescription.type,
           sdp: offerDescription.sdp,
-        };
+        } as RTCSessionDescription;
 
         setCall(prevState => ({
           ...prevState,
@@ -327,7 +355,7 @@ function App() {
         const answer = {
           type: answerDescription.type,
           sdp: answerDescription.sdp,
-        };
+        } as RTCSessionDescription;
 
         setCall(prevState => ({
           ...prevState,
@@ -371,18 +399,62 @@ function App() {
     setRemoteStream(null);
   };
 
+  const toggleVideo = () => {
+    if (localStream && socket) {
+      const videoTrack = localStream.getVideoTracks()[0];
+      videoTrack.enabled = !videoTrack.enabled;
+      setActiveVideoLocalStream(videoTrack.enabled);
+
+      if (call.to) {
+        const sendTo = Object.keys(users || {}).find(key => key !== username);
+        socket.emit('toggleVideo', {isActive: videoTrack.enabled, to: sendTo});
+      }
+    }
+  };
+
+  const toggleAudio = () => {
+    if (localStream && socket) {
+      const audioTrack = localStream.getAudioTracks()[0];
+      audioTrack.enabled = !audioTrack.enabled;
+      setActiveAudioLocalStream(audioTrack.enabled);
+      if (call.to) {
+        const sendTo = Object.keys(users || {}).find(key => key !== username);
+        socket.emit('toggleAudio', {isActive: audioTrack.enabled, to: sendTo});
+      }
+    }
+  };
+
   if (gettingCall) {
-    return <GettingCall hangup={hangup} join={join} />;
+    const sendTo = Object.keys(users || {}).find(key => key !== username);
+
+    return (
+      <GettingCall
+        photo={username !== sendTo ? YourImg : OtherImg}
+        hangup={hangup}
+        join={join}
+      />
+    );
   }
 
   // Exibe o localStream ligando
   // Exibe tanto o local quanto o remoto uma vez que acontece a conexão
   if (localStream) {
+    const currentUser = username;
+    const sendTo = Object.keys(users || {}).find(key => key !== username);
+
     return (
       <Video
+        toggleVideo={toggleVideo}
+        toggleAudio={toggleAudio}
         hangup={hangup}
         localStream={localStream}
+        activeVideoLocalStream={activeVideoLocalStream}
+        activeAudioLocalStream={activeAudioLocalStream}
+        photoLocalStream={users[currentUser as keyof UsersJoined].photo}
         remoteStream={remoteStream}
+        activeVideoRemoteStream={activeVideoRemoteStream}
+        activeAudioRemoteStream={activeAudioRemoteStream}
+        photoRemoteStream={users[sendTo as keyof UsersJoined].photo}
       />
     );
   }
