@@ -10,7 +10,7 @@ import {
 import GettingCall from './components/GettingCall';
 import Button from './components/Button';
 import io, {Socket} from 'socket.io-client';
-import {IP_ADDRESS, ONESIGNAL_APP_ID} from '@env';
+import {IP_ADDRESS, ONESIGNAL_APP_ID, MY_USER_ID} from '@env';
 import DeviceInfo from 'react-native-device-info';
 import {NotificationClickEvent, OneSignal} from 'react-native-onesignal';
 import {UsersJoined} from './types/User';
@@ -22,7 +22,7 @@ import {
 import RTCTrackEvent from 'react-native-webrtc/lib/typescript/RTCTrackEvent';
 import RTCIceCandidateEvent from 'react-native-webrtc/lib/typescript/RTCIceCandidateEvent';
 import YourImg from './img/Caller.jpg';
-import OtherImg from './img/Caller2.jpg';
+import OtherImg from './img/Caller3.jpg';
 import {Alert} from 'react-native';
 
 const config = {
@@ -92,8 +92,7 @@ function App() {
       const userJoinedObj: UsersJoined = {
         username,
         oneSignalSubscriptionId,
-        // colocar seu username mockado
-        photo: username === 'user_id' ? YourImg : OtherImg,
+        photo: username === MY_USER_ID ? YourImg : OtherImg,
       };
       socket.emit('user-joined', userJoinedObj);
 
@@ -426,10 +425,10 @@ function App() {
 
   if (gettingCall) {
     const sendTo = Object.keys(users || {}).find(key => key !== username);
-
+  
     return (
       <GettingCall
-        photo={username !== sendTo ? YourImg : OtherImg}
+        photo={users[sendTo].photo}
         hangup={hangup}
         join={join}
       />
@@ -440,7 +439,7 @@ function App() {
   // Exibe tanto o local quanto o remoto uma vez que acontece a conexão
   if (localStream) {
     const currentUser = username;
-    const sendTo = Object.keys(users || {}).find(key => key !== username);
+    const sendTo = Object.keys(users || {}).find(key => key !== username) ?? '';
 
     return (
       <Video
@@ -450,11 +449,11 @@ function App() {
         localStream={localStream}
         activeVideoLocalStream={activeVideoLocalStream}
         activeAudioLocalStream={activeAudioLocalStream}
-        photoLocalStream={users[currentUser as keyof UsersJoined].photo}
+        photoLocalStream={users[currentUser].photo}
         remoteStream={remoteStream}
         activeVideoRemoteStream={activeVideoRemoteStream}
         activeAudioRemoteStream={activeAudioRemoteStream}
-        photoRemoteStream={users[sendTo as keyof UsersJoined].photo}
+        photoRemoteStream={users[sendTo].photo}
       />
     );
   }

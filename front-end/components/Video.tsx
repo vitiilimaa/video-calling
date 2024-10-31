@@ -67,42 +67,44 @@ export default function Video(props: Props) {
   if (props.localStream && props.remoteStream) {
     return (
       <View style={styles.container}>
-        {props.activeVideoRemoteStream ? (
-          <RTCView
-            streamURL={props.remoteStream?.toURL() ?? ''}
-            objectFit="cover"
-            style={styles.video}
-            zOrder={4}
-          />
-        ) : (
-          <Image
-            source={props.photoRemoteStream as ImageSourcePropType}
-            style={styles.video}
-          />
-        )}
-
-        <View style={styles.containerVideoLocal}>
-          {props.activeVideoLocalStream ? (
+        <View style={styles.containerVideoRemote}>
+          {props.activeVideoRemoteStream ? (
             <RTCView
-              streamURL={props.localStream?.toURL() ?? ''}
+              streamURL={props.remoteStream?.toURL() ?? ''}
               objectFit="cover"
-              style={styles.videoLocal}
-              zOrder={1}
+              style={styles.video}
+              zOrder={4}
             />
           ) : (
             <Image
-              source={props.photoLocalStream as ImageSourcePropType}
-              style={styles.videoLocal}
+              source={props.photoRemoteStream as ImageSourcePropType}
+              style={styles.video}
             />
           )}
-          {!props.activeAudioLocalStream && (
-            <IconBox
-              iconName={'microphone-slash'}
-              backgroundColor="grey"
-              style={styles.iconMuteVideoLocal}
-            />
+          {!props.activeAudioRemoteStream && (
+            <View>
+              <IconBox
+                iconName={'microphone-slash'}
+                backgroundColor="grey"
+                style={styles.iconMuteVideoRemote}
+              />
+            </View>
           )}
         </View>
+
+        {props.activeVideoLocalStream ? (
+          <RTCView
+            streamURL={props.localStream?.toURL() ?? ''}
+            objectFit="cover"
+            style={styles.videoLocal}
+            zOrder={1}
+          />
+        ) : (
+          <Image
+            source={props.photoLocalStream as ImageSourcePropType}
+            style={styles.videoLocal}
+          />
+        )}
 
         <ButtonContainer
           activeVideoLocalStream={props.activeVideoLocalStream}
@@ -129,36 +131,34 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     elevation: 9,
   },
+  containerVideoRemote: {
+    position: 'absolute',
+    width: '100%',
+    height: '100%',
+    display: 'flex',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+  },
+  iconMuteVideoRemote: {
+    marginBottom: 120,
+  },
   video: {
     position: 'absolute',
     width: '100%',
     height: '100%',
   },
-  containerVideoLocal: {
+  videoLocal: {
     backgroundColor: '#000',
     position: 'absolute',
-    display: 'flex',
-    justifyContent: 'flex-end',
-    alignItems: 'flex-end',
     width: 100,
     height: 150,
     top: 0,
     left: 20,
     elevation: 10,
   },
-  videoLocal: {
-    position: 'absolute',
-    backgroundColor: '#000',
-    width: '100%',
-    height: '100%',
-  },
   imageLocal: {
     position: 'absolute',
     width: '100%',
     height: '100%',
-  },
-  iconMuteVideoLocal: {
-    marginBottom: 5,
-    marginRight: 5,
   },
 });
