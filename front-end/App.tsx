@@ -44,10 +44,11 @@ function App() {
   const [localStream, setLocalStream] = useState<MediaStream | null>();
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>();
   const [gettingCall, setGettingCall] = useState(false);
-  const [username, setUsername] = useState('');
-  const [oneSignalSubscriptionId, setOneSignalSubscriptionId] = useState<
-    string | null
-  >(null);
+  const [userJoined, setUserJoined] = useState<UsersJoined>({
+    username: '',
+    oneSignalSubscriptionId: '',
+    photo: '',
+  });
   const [call, setCall] = useState<GettingCallProps>({
     from: '',
     to: '',
@@ -64,155 +65,9 @@ function App() {
   const [activeAudioLocalStream, setActiveAudioLocalStream] = useState(true);
   const [activeVideoRemoteStream, setActiveVideoRemoteStream] = useState(true);
   const [activeAudioRemoteStream, setActiveAudioRemoteStream] = useState(true);
+  const [callAcceptedByNotification, setCallAcceptedByNotification] =
+    useState(false);
   const peerConnection = useRef<RTCPeerConnection>();
-
-  // Conecta ao servidor e seta um nome para o usuário que abriu o aplicativo
-  useEffect(() => {
-    const newSocket = io(`http://${IP_ADDRESS}:9000`);
-    setSocket(newSocket);
-
-    const generateMockUsername = async () => {
-      const deviceId = await DeviceInfo.getUniqueId();
-      const subscriptionId = await OneSignal.User.pushSubscription.getIdAsync();
-
-      const mockUsername = `user_${deviceId.substring(0, 8)}`;
-      setUsername(mockUsername);
-      setOneSignalSubscriptionId(subscriptionId);
-    };
-
-    generateMockUsername();
-
-    return () => {
-      newSocket.disconnect();
-    };
-  }, []);
-
-  useEffect(() => {
-    if (socket && username && oneSignalSubscriptionId) {
-      const userJoinedObj: UsersJoined = {
-        username,
-        oneSignalSubscriptionId,
-        photo: username === MY_USER_ID ? YourImg : OtherImg,
-      };
-      socket.emit('user-joined', userJoinedObj);
-
-      const handleUsers = (allUsers: UsersJoined) => {
-        console.log({allUsers});
-        setUsers(allUsers);
-      };
-
-      const handleOffer = async ({from, to, offer}: OfferPayload) => {
-        setCall(prevState => ({
-          ...prevState,
-          from,
-          to,
-          offer,
-        }));
-        setGettingCall(true);
-      };
-
-      const handleAnswer = async ({answer}: AnswerPayload) => {
-        try {
-          if (peerConnection.current) {
-            setCall(prevState => ({...prevState, answer}));
-            const answerDescription = new RTCSessionDescription(answer);
-            await peerConnection.current.setRemoteDescription(
-              answerDescription,
-            );
-
-            const personWhoWillCall = username;
-            const personWhoWillBeCalled = Object.keys(users || {}).find(
-              key => key !== username,
-            );
-
-            socket.emit('answerIcecandidate', {
-              from: personWhoWillCall,
-              to: personWhoWillBeCalled,
-              answer: peerConnection.current.localDescription,
-            });
-          }
-        } catch (err) {
-          console.error('error handleAnswer:', err);
-        }
-      };
-
-      const handleIceCandidate = async ({candidates}: IceCandidatePayload) => {
-        try {
-          if (peerConnection.current) {
-            for (const candidate of candidates) {
-              await peerConnection.current
-                .addIceCandidate(candidate)
-                .catch(error =>
-                  console.error('Error adding ICE candidate:', error),
-                );
-            }
-          }
-        } catch (err) {
-          console.error('error handleIceCandidate:', err);
-        }
-      };
-
-      const handleCallEnded = () => {
-        if (peerConnection.current) {
-          peerConnection.current.close();
-          peerConnection.current = undefined;
-        }
-        streamCleanUp();
-        setGettingCall(false);
-        OneSignal.Notifications.clearAll();
-        setActiveVideoLocalStream(true);
-        setActiveAudioLocalStream(true);
-        setActiveVideoRemoteStream(true);
-        setActiveAudioRemoteStream(true);
-      };
-
-      const handleToggleVideo = (isActive: boolean) => {
-        setActiveVideoRemoteStream(isActive);
-      };
-
-      const handleToggleAudio = (isActive: boolean) => {
-        setActiveAudioRemoteStream(isActive);
-      };
-
-      socket.on('get-users', handleUsers);
-      socket.on('offer', handleOffer);
-      socket.on('answer', handleAnswer);
-      socket.on('icecandidate', handleIceCandidate);
-      socket.on('call-ended', handleCallEnded);
-      socket.on('toggleVideo', handleToggleVideo);
-      socket.on('toggleAudio', handleToggleAudio);
-
-      return () => {
-        socket.off('get-users', handleUsers);
-        socket.off('offer', handleOffer);
-        socket.off('answer', handleAnswer);
-        socket.off('icecandidate', handleIceCandidate);
-        socket.off('call-ended', handleCallEnded);
-      };
-    }
-  }, [socket, username, oneSignalSubscriptionId]);
-
-  useEffect(() => {
-    const onOpen = async (event: NotificationClickEvent) => {
-      const action = event.result.actionId;
-      if (action === 'accept-call') {
-        await join();
-      } else if (action === 'refuse-call') {
-        await hangup();
-        if (peerConnection.current) {
-          peerConnection.current.close();
-          peerConnection.current = undefined;
-        }
-        streamCleanUp();
-        setGettingCall(false);
-      } else console.log('Você abriu o app');
-    };
-
-    OneSignal.initialize(ONESIGNAL_APP_ID);
-    OneSignal.Notifications.requestPermission(true);
-    OneSignal.Notifications.addEventListener('click', onOpen);
-    return () => OneSignal.Notifications.removeEventListener('click', onOpen);
-  }, [socket, call]);
 
   // Configura uma conexão WebRTC para estabelecer uma chamada de vídeo entre dois peers (usuários)
   const setupWebrtc = async () => {
@@ -260,6 +115,7 @@ function App() {
 
   const create = async () => {
     if (Object.keys(users || {}).length !== 2) {
+      if (socket) socket.emit('user-joined', {log: users});
       return Alert.alert(
         'Alerta',
         'É necessário que pelo menos tenha o cadastro de 2 pessoas no aplicativo.',
@@ -270,9 +126,9 @@ function App() {
       await setupWebrtc();
 
       if (peerConnection.current && socket) {
-        const personWhoWillCall = username;
+        const personWhoWillCall = userJoined.username;
         const personWhoWillBeCalled = Object.keys(users || {}).find(
-          key => key !== username,
+          key => key !== userJoined.username,
         );
 
         if ('onicecandidate' in peerConnection.current) {
@@ -321,59 +177,87 @@ function App() {
     }
   };
 
-  const join = async () => {
-    await setupWebrtc();
+  const join = async (offlineObj?: {
+    from: string;
+    to: string;
+    offer: RTCSessionDescription;
+  }) => {
     try {
-      if (peerConnection.current && socket && call.offer) {
-        if ('onicecandidate' in peerConnection.current) {
-          peerConnection.current.onicecandidate = (
-            event: RTCIceCandidateEvent<'icecandidate'>,
-          ) => {
-            if (event.candidate) {
-              const currentUser = username;
-              const sendTo = Object.keys(users || {}).find(
-                key => key !== username,
-              );
-              socket.emit('answerCandidates', {
-                candidate: event.candidate.toJSON(),
-                from: currentUser || '',
-                to: sendTo || '',
-              });
-            }
-          };
+      if (socket) {
+        if (!call.to && !offlineObj?.to) {
+          const deviceId = await DeviceInfo.getUniqueId();
+          const mockUsername = `user_${deviceId.substring(0, 8)}`;
+          socket.emit('get-offer', {from: mockUsername});
+          return;
         }
 
-        const offerDescription = call.offer;
-        await peerConnection.current.setRemoteDescription(
-          new RTCSessionDescription(offerDescription),
-        );
+        await setupWebrtc();
 
-        const answerDescription = await peerConnection.current.createAnswer();
-        await peerConnection.current.setLocalDescription(answerDescription);
+        if (peerConnection.current) {
+          if ('onicecandidate' in peerConnection.current) {
+            peerConnection.current.onicecandidate = (
+              event: RTCIceCandidateEvent<'icecandidate'>,
+            ) => {
+              if (event.candidate) {
+                const currentUser = userJoined.username
+                  ? userJoined.username
+                  : offlineObj?.to;
+                const sendTo =
+                  Object.keys(users || {}).find(
+                    key => key !== userJoined.username,
+                  ) !== 'username' ??
+                  Object.keys(users || {}).find(
+                    key => key !== userJoined.username,
+                  ) !== undefined
+                    ? Object.keys(users || {}).find(
+                        key => key !== userJoined.username,
+                      )
+                    : offlineObj?.from;
+                socket.emit('answerCandidates', {
+                  candidate: event.candidate.toJSON(),
+                  from: currentUser || '',
+                  to: sendTo || '',
+                });
+              }
+            };
+          }
 
-        const answer = {
-          type: answerDescription.type,
-          sdp: answerDescription.sdp,
-        } as RTCSessionDescription;
+          const offerDescription = call.offer ? call.offer : offlineObj?.offer;
+          await peerConnection.current.setRemoteDescription(
+            new RTCSessionDescription(offerDescription),
+          );
 
-        setCall(prevState => ({
-          ...prevState,
-          answer,
-        }));
+          const answerDescription = await peerConnection.current.createAnswer();
+          await peerConnection.current.setLocalDescription(answerDescription);
 
-        socket.emit('answer', {
-          from: call.from,
-          to: call.to,
-          answer,
-        });
+          const answer = {
+            type: answerDescription.type,
+            sdp: answerDescription.sdp,
+          } as RTCSessionDescription;
 
-        socket.emit('offerIcecandidate', {
-          from: call.from,
-          to: call.to,
-        });
+          setCall(prevState => ({
+            ...prevState,
+            answer,
+          }));
+
+          const from = call.from ? call.from : offlineObj?.from;
+          const to = call.to ? call.to : offlineObj?.to;
+
+          socket.emit('answer', {
+            from,
+            to,
+            answer,
+          });
+
+          socket.emit('offerIcecandidate', {
+            from,
+            to,
+          });
+        }
       }
 
       setGettingCall(false);
+      setCallAcceptedByNotification(false);
       OneSignal.Notifications.clearAll();
     } catch (err) {
       console.error('error join:', err);
@@ -382,7 +266,11 @@ function App() {
 
   // Para desconectar da chamada, libera a stream e deleta o documento da chamada
   const hangup = async () => {
-    if (socket) socket.emit('hangup-call', {from: call.from, to: call.to});
+    const deviceId = await DeviceInfo.getUniqueId();
+    const mockUsername = `user_${deviceId.substring(0, 8)}`;
+
+    const from = mockUsername;
+    if (socket) socket.emit('hangup-call', {from});
   };
 
   const streamCleanUp = () => {
@@ -405,7 +293,9 @@ function App() {
       setActiveVideoLocalStream(videoTrack.enabled);
 
       if (call.to) {
-        const sendTo = Object.keys(users || {}).find(key => key !== username);
+        const sendTo = Object.keys(users || {}).find(
+          key => key !== userJoined.username,
+        );
         socket.emit('toggleVideo', {isActive: videoTrack.enabled, to: sendTo});
       }
     }
@@ -417,29 +307,212 @@ function App() {
       audioTrack.enabled = !audioTrack.enabled;
       setActiveAudioLocalStream(audioTrack.enabled);
       if (call.to) {
-        const sendTo = Object.keys(users || {}).find(key => key !== username);
+        const sendTo = Object.keys(users || {}).find(
+          key => key !== userJoined.username,
+        );
         socket.emit('toggleAudio', {isActive: audioTrack.enabled, to: sendTo});
       }
     }
   };
 
+  useEffect(() => {
+    const newSocket = io(`http://${IP_ADDRESS}:9000`);
+    setSocket(newSocket);
+
+    const generateMockUsername = async () => {
+      const deviceId = await DeviceInfo.getUniqueId();
+      const subscriptionId = await OneSignal.User.pushSubscription.getIdAsync();
+
+      const mockUsername = `user_${deviceId.substring(0, 8)}`;
+      setUserJoined(prevState => ({
+        ...prevState,
+        username: mockUsername,
+        oneSignalSubscriptionId: subscriptionId || '',
+        photo: mockUsername === MY_USER_ID ? YourImg : OtherImg,
+      }));
+      newSocket.emit('user-joined', {
+        username: mockUsername,
+        oneSignalSubscriptionId: subscriptionId,
+        photo: mockUsername === MY_USER_ID ? YourImg : OtherImg,
+      });
+    };
+
+    generateMockUsername();
+
+    return () => {
+      newSocket.disconnect();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (socket) {
+      const handleUsers = async (allUsers: UsersJoined) => {
+        console.log({allUsers});
+        setUsers(allUsers);
+
+        if (callAcceptedByNotification) {
+          await join();
+        }
+      };
+
+      const handleOffer = async ({from, to, offer}: OfferPayload) => {
+        setCall(prevState => ({
+          ...prevState,
+          from,
+          to,
+          offer,
+        }));
+
+        setGettingCall(true);
+      };
+
+      const handleOfferOffline = async ({from, to, offer}: OfferPayload) => {
+        setCall(prevState => ({
+          ...prevState,
+          from,
+          to,
+          offer,
+        }));
+
+        const offlineUserObj = {
+          from,
+          to,
+          offer,
+        };
+
+        await join(offlineUserObj);
+      };
+
+      const handleAnswer = async ({answer}: AnswerPayload) => {
+        try {
+          if (peerConnection.current) {
+            setCall(prevState => ({...prevState, answer}));
+            const answerDescription = new RTCSessionDescription(answer);
+            await peerConnection.current.setRemoteDescription(
+              answerDescription,
+            );
+
+            const personWhoWillCall = userJoined.username;
+            const personWhoWillBeCalled = Object.keys(users || {}).find(
+              key => key !== userJoined.username,
+            );
+
+            socket.emit('answerIcecandidate', {
+              from: personWhoWillCall,
+              to: personWhoWillBeCalled,
+              answer: peerConnection.current.localDescription,
+            });
+          }
+        } catch (err) {
+          console.error('error handleAnswer:', err);
+        }
+      };
+
+      const handleIceCandidate = async ({candidates}: IceCandidatePayload) => {
+        try {
+          if (peerConnection && peerConnection.current && candidates) {
+            for (const candidate of candidates) {
+              await peerConnection.current
+                .addIceCandidate(candidate)
+                .catch(error =>
+                  console.error('Error adding ICE candidate:', error),
+                );
+            }
+          }
+        } catch (err) {
+          console.error('error handleIceCandidate:', err);
+        }
+      };
+
+      const handleCallEnded = () => {
+        if (peerConnection.current) {
+          peerConnection.current.close();
+          peerConnection.current = undefined;
+        }
+        streamCleanUp();
+        setGettingCall(false);
+        OneSignal.Notifications.clearAll();
+        setActiveVideoLocalStream(true);
+        setActiveAudioLocalStream(true);
+        setActiveVideoRemoteStream(true);
+        setActiveAudioRemoteStream(true);
+      };
+
+      const handleToggleVideo = (isActive: boolean) => {
+        setActiveVideoRemoteStream(isActive);
+      };
+
+      const handleToggleAudio = (isActive: boolean) => {
+        setActiveAudioRemoteStream(isActive);
+      };
+
+      const handleHasOffer = (hasOffer: boolean) => {
+        if (hasOffer) setGettingCall(true);
+      };
+
+      socket.on('get-users', handleUsers);
+      socket.on('offer', handleOffer);
+      socket.on('get-offer', handleOfferOffline);
+      socket.on('answer', handleAnswer);
+      socket.on('icecandidate', handleIceCandidate);
+      socket.on('call-ended', handleCallEnded);
+      socket.on('toggleVideo', handleToggleVideo);
+      socket.on('toggleAudio', handleToggleAudio);
+      socket.on('has-offer', handleHasOffer);
+
+      return () => {
+        socket.off('get-users', handleUsers);
+        socket.off('offer', handleOffer);
+        socket.off('answer', handleAnswer);
+        socket.off('get-offer', handleOfferOffline);
+        socket.off('icecandidate', handleIceCandidate);
+        socket.off('call-ended', handleCallEnded);
+        socket.off('toggleVideo', handleToggleVideo);
+        socket.off('toggleAudio', handleToggleAudio);
+        socket.off('hasOffer', handleHasOffer);
+      };
+    }
+  }, [socket, userJoined, callAcceptedByNotification]);
+
+  useEffect(() => {
+    const onOpen = async (event: NotificationClickEvent) => {
+      const action = event.result.actionId;
+      if (action === 'accept-call') {
+        if (socket) await join();
+        else setCallAcceptedByNotification(true);
+      } else if (action === 'refuse-call') {
+        await hangup();
+      } else console.log('Você abriu o app');
+    };
+
+    OneSignal.initialize(ONESIGNAL_APP_ID);
+    OneSignal.Notifications.requestPermission(true);
+    OneSignal.Notifications.addEventListener('click', onOpen);
+    return () => OneSignal.Notifications.removeEventListener('click', onOpen);
+  }, [socket, call]);
+
+  useEffect(() => {
+    if (socket && userJoined.username) {
+      socket.emit('has-offer', {username: userJoined.username});
+    }
+  }, [socket, userJoined]);
+
   if (gettingCall) {
-    const sendTo = Object.keys(users || {}).find(key => key !== username);
-  
+    const sendTo = Object.keys(users || {}).find(
+      key => key !== userJoined.username,
+    );
+
     return (
-      <GettingCall
-        photo={users[sendTo].photo}
-        hangup={hangup}
-        join={join}
-      />
+      <GettingCall photo={users[sendTo].photo} hangup={hangup} join={join} />
     );
   }
 
   // Exibe o localStream ligando
   // Exibe tanto o local quanto o remoto uma vez que acontece a conexão
   if (localStream) {
-    const currentUser = username;
-    const sendTo = Object.keys(users || {}).find(key => key !== username) ?? '';
+    const currentUser = userJoined.username;
+    const sendTo =
+      Object.keys(users || {}).find(key => key !== userJoined.username) ?? '';
 
     return (
       <Video
@@ -449,11 +522,11 @@ function App() {
         localStream={localStream}
         activeVideoLocalStream={activeVideoLocalStream}
         activeAudioLocalStream={activeAudioLocalStream}
-        photoLocalStream={users[currentUser].photo}
+        photoLocalStream={users[currentUser]?.photo}
         remoteStream={remoteStream}
         activeVideoRemoteStream={activeVideoRemoteStream}
         activeAudioRemoteStream={activeAudioRemoteStream}
-        photoRemoteStream={users[sendTo].photo}
+        photoRemoteStream={users[sendTo]?.photo}
       />
     );
   }
