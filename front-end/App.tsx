@@ -114,14 +114,6 @@ function App() {
   };
 
   const create = async () => {
-    if (Object.keys(users || {}).length !== 2) {
-      if (socket) socket.emit('user-joined', {log: users});
-      return Alert.alert(
-        'Alerta',
-        'É necessário que pelo menos tenha o cadastro de 2 pessoas no aplicativo.',
-      );
-    }
-
     try {
       await setupWebrtc();
 
@@ -316,7 +308,7 @@ function App() {
   };
 
   useEffect(() => {
-    const newSocket = io(`http://${IP_ADDRESS}:9000`);
+    const newSocket = io(`http:${IP_ADDRESS}:9000`);
     setSocket(newSocket);
 
     const generateMockUsername = async () => {

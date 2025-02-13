@@ -29,10 +29,12 @@ io.on("connection", (socket) => {
   );
 
   socket.on("offer", async ({ from, to, offer }) => {
-    if (allUsers[to].id)
+    if (allUsers[to]?.id) {
       io.to(allUsers[to].id).emit("offer", { from, to, offer });
+    }
+    
     allUsers[to].offer = offer;
-
+    
     const notificationData = {
       app_id: process.env.ONESIGNAL_APP_ID,
       headings: { en: "Chamada recebida" },
@@ -56,6 +58,7 @@ io.on("connection", (socket) => {
       });
 
       const notification = await response.json();
+
       allUsers[to].notification_id = notification.id;
       allUsers[from].notification_id = notification.id;
     } catch (error) {
@@ -83,11 +86,12 @@ io.on("connection", (socket) => {
   });
 
   socket.on("answer", ({ from, to, answer }) => {
+    if (allUsers[from]?.id)
     io.to(allUsers[from].id).emit("answer", { from, to, answer, allUsers });
   });
 
   socket.on("offerCandidates", ({ candidate, to }) => {
-    if (!allUsers[to]?.offerCandidates) {
+    if (allUsers[to] && !allUsers[to]?.offerCandidates) {
       allUsers[to].offerCandidates = [];
     }
 
@@ -113,11 +117,13 @@ io.on("connection", (socket) => {
   });
 
   socket.on("toggleVideo", ({ isActive, to }) => {
+    if (allUsers[to] && allUsers[to]?.id)
     socket.to(allUsers[to].id).emit("toggleVideo", isActive);
   });
 
   socket.on("toggleAudio", ({ isActive, to }) => {
-    socket.to(allUsers[to].id).emit("toggleAudio", isActive);
+    if (allUsers[to] && allUsers[to]?.id)
+      socket.to(allUsers[to].id).emit("toggleAudio", isActive);
   });
 
   socket.on("hangup-call", ({ from }) => {
@@ -152,6 +158,8 @@ io.on("connection", (socket) => {
         allUsers[username].answer = [];
       }
     }
+
+    console.log({ allUsers });
     io.emit("get-users", allUsers);
     io.emit("call-ended", true);
     console.log("Usuário desconectado");
