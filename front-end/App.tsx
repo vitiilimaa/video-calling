@@ -308,7 +308,7 @@ function App() {
   };
 
   useEffect(() => {
-    const newSocket = io(`http:${IP_ADDRESS}:9000`);
+    const newSocket = io(`http://${IP_ADDRESS}:9000`);
     setSocket(newSocket);
 
     const generateMockUsername = async () => {
